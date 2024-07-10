@@ -1,0 +1,27 @@
+scikit-learn==0.24.1
+pickleshare==0.7.5
+ninja==1.10.2.3
+easydict==1.9
+PyYAML==6.0
+protobuf==3.19.4
+tensorboard==2.8.0
+termcolor==1.1.0
+tqdm==4.62.3
+multimethod==1.7
+h5py==3.6.0
+matplotlib==3.5.1
+pyvista==0.33.2
+setuptools==59.5.0 # must be this version for mmcv
+Cython==0.29.28
+gdown
+wandb
+mmcv
+deepspeed
+seaborn
+shortuuid
+open3d
+nni
+
+# Required for PTv2 
+einops
+timm

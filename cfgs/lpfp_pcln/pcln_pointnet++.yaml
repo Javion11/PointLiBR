@@ -1,0 +1,121 @@
+teacher_model:
+  pretrain_path: # pretrained teacher model path
+  NAME: StackedSeg
+  stem_layer: 'kpconv' # 'mlp', 'kpconv', False
+  stem_oupchannels: 32 # add a stem mlp before all stacked pointnet++ module
+  stacked_num: 4
+  encoder_args: 
+    NAME: PointNet2Encoder
+    in_channels: 4
+    width: null
+    strides: [4, 4, 4, 4]
+    layers: 3
+    use_res: False
+    mlps: [[[32, 32, 64]],  # stage 1: 96
+        [[64, 64, 128]], # stage 2: 256
+        [[128, 128, 256]], # stage 3: 512
+        [[256, 256, 512]]] # stage 4: 1024
+    radius: 0.1
+    num_samples: 32
+    sample_method: fps
+    aggr_args:
+      NAME: 'convpool'
+      feature_type: 'dp_fj'
+      anisotropic: False
+      reduction: 'max'
+    group_args:
+      NAME: 'ballquery'
+      use_xyz: True
+    conv_args:
+      order: conv-norm-act
+    act_args:
+      act: 'relu'
+    norm_args:
+      norm: 'bn'
+  decoder_args:
+    NAME: PointNet2Decoder
+    fp_mlps: [[128, 128, 128], [256, 128], [256, 256], [256, 256]]
+  cls_args:
+    NAME: SegHead
+    num_classes: 13
+    in_channels: null
+
+student_model:
+  NAME: StackedSeg
+  stem_layer: 'kpconv' # 'mlp', 'kpconv', False
+  stem_oupchannels: 16 # add a stem mlp before all stacked pointnet++ module
+  stacked_num: 4
+  encoder_args: 
+    NAME: PointNet2Encoder
+    in_channels: 4
+    width: null
+    strides: [4, 4, 4, 4]
+    layers: 3
+    use_res: False
+    mlps: [[[16, 16, 32]],  # stage 1: 96/2
+        [[32, 32, 64]], # stage 2: 256/2
+        [[64, 64, 128]], # stage 3: 512/2
+        [[128, 128, 256]]] # stage 4: 1024/2
+    # mlps: [[[8, 8, 16]],  # stage 1: 96/4
+    #     [[16, 16, 32]], # stage 2: 256/4
+    #     [[32, 32, 64]], # stage 3: 512/4
+    #     [[64, 64, 128]]] # stage 4: 1024/4
+    radius: 0.1
+    num_samples: 32
+    sample_method: fps
+    aggr_args:
+      NAME: 'convpool'
+      feature_type: 'dp_fj'
+      anisotropic: False
+      reduction: 'max'
+    group_args:
+      NAME: 'ballquery'
+      use_xyz: True
+    conv_args:
+      order: conv-norm-act
+    act_args:
+      act: 'relu'
+    norm_args:
+      norm: 'bn'
+  decoder_args:
+    NAME: PointNet2Decoder
+    fp_mlps: [[64, 64, 64], [128, 64], [128, 128], [128, 128]] # 1/2
+    # fp_mlps: [[32, 32, 32], [64, 32], [64, 64], [64, 64]] # 1/4
+  cls_args:
+    NAME: SegHead
+    num_classes: 13
+    in_channels: null
+
+datatransforms:
+  train: [ChromaticAutoContrast, PointsToTensor, PointCloudScaling, PointCloudFloorCentering, PointCloudJitter, ChromaticDropGPU, ChromaticNormalize]
+  val: [PointsToTensor, PointCloudFloorCentering, ChromaticNormalize]
+  vote: [ChromaticDropGPU]
+  kwargs:
+    color_drop: 0.2
+    gravity_dim: 2
+    scale: [0.9, 1.1]
+    jitter_sigma: 0.005
+    jitter_clip: 0.02
+
+dataloader:
+  num_workers: 8
+batch_size: 4
+criterion:
+  NAME: CrossEntropy
+  label_smoothing: 0.2
+
+criterion_kd:
+  NAME: CriterionKD
+  temperature: 4 
+  loss_weight: 1.0
+  kd: [2,3] # whether to use kd, [0,3] refer to module 0,3 compute kd loss
+  kd_weight: 1.0
+  # NOTE: structure [3] is non-stationary, not suggest
+  structure: [1,2] # whether to use struction kd, [1,2] refer to module 1,2 compute structure_kd loss
+  structure_weight: 1.0
+  at: [2,3] # whether to use Attention Transfer, [1,3] refer to module 1,3 compute at loss
+  at_weight: 1.0
+
+alpha: [1, 1, 1, 1] # params used for st-kd loss
+beta: [1, 1, 1, 1] # params used for at loss
+gamma: [1, 1, 1, 1] # params used for kd loss

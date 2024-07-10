@@ -1,0 +1,12 @@
+model:
+  NAME: PTSegStacked
+  stem_layer: 'kpconv' # 'mlp', 'kpconv', False
+  stem_channels: 32
+  in_channels: 4
+  stacked_num: 4
+  width: 32 
+  inter_channels: 128
+
+batch_size: 2 # width=32, batch_size=2; width=16, batch_size=4
+dataloader:
+  num_workers: 4 # batch_size=2, num_workers=4; batch_size=4, num_workers=8
