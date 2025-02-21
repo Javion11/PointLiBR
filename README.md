@@ -86,4 +86,13 @@ If you find _PointLiBR_ useful to your research, please cite my work as encourag
   year={2024},
   publisher={IEEE}
 }
+
+@inproceedings{han2024subspace,
+  title={Subspace prototype guidance for mitigating class imbalance in point cloud semantic segmentation},
+  author={Han, Jiawei and Liu, Kaiqi and Li, Wei and Chen, Guangzhi},
+  booktitle={European Conference on Computer Vision},
+  pages={255--272},
+  year={2024},
+  organization={Springer}
+}
 ```
