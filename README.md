@@ -7,7 +7,7 @@ IEEE Transactions on Image Processing (**TIP**) 2024
 European Conference on Computer Vision (**ECCV**) 2024
 
 - **Generating Inverse Feature Space for Class Imbalance in Point Cloud Semantic Segmentation**  
-IEEE Transactions on Pattern Analysis and Machine Intelligence (**TPAMI**) 2024
+IEEE Transactions on Pattern Analysis and Machine Intelligence (**TPAMI**) 2025
 
 _by [Jiawei Han](https://github.com/Javion11)_
 
