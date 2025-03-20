@@ -514,3 +514,44 @@ class PointNet2PartDecoder(nn.Module):
             l_features[1]
         )
         return l_features[0]
+
+
+@MODELS.register_module()
+class SegHead(nn.Module):
+    def __init__(self,
+                 num_classes, in_channels,
+                 mlps = None, 
+                 norm_args={'norm': 'bn1d'},
+                 act_args={'act': 'relu'},
+                 dropout=0.5,
+                 **kwargs
+                 ):
+        """A scene segmentation head for ResNet backbone.
+        Args:
+            num_classes: class num.
+            in_channles: the base channel num.
+        Returns:
+            logits: (B, num_classes, N)
+        """
+        super().__init__()
+        if kwargs:
+            logging.warning(f"kwargs: {kwargs} are not used in {__class__.__name__}")
+        if mlps is None:
+            mlps = [in_channels, in_channels] + [num_classes]
+        else:
+            mlps = [in_channels] + mlps + [num_classes]
+        heads = []
+        print(mlps, norm_args, act_args)
+        for i in range(len(mlps) - 2):
+            heads.append(create_convblock1d(mlps[i], mlps[i + 1],
+                                            norm_args=norm_args,
+                                            act_args=act_args))
+            if dropout:
+                heads.append(nn.Dropout(dropout))
+
+        heads.append(create_convblock1d(mlps[-2], mlps[-1], act_args=None))
+        self.head = nn.Sequential(*heads)
+
+    def forward(self, end_points):
+        logits = self.head(end_points)
+        return logits

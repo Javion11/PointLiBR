@@ -52,30 +52,33 @@ class Focal_Loss(nn.Module):
     Focal loss implemented in multiple classifications
     Formula: - alpha*(1-pt)**gamma*cross_entropy (pt is softmax(pred); label_smoothing param control cross_entropy)
     """
-    def __init__(self,alpha=0.25,gamma=2,label_smoothing=0,weight=None): 
+    def __init__(self, alpha=0.25, gamma=2, label_smoothing=0, weight=None, num_classes=13): 
         super(Focal_Loss,self).__init__()
-        self.alpha=alpha
-        self.gamma=gamma
-        self.label_smoothing=label_smoothing
-        self.weight=weight
-        if label_smoothing==0:
-            self.cross_entropy=CrossEntropyLoss()
-        else:
-            self.cross_entropy=CrossEntropyLoss(reduction='none',label_smoothing=label_smoothing)
-    def forward(self,pred,label):
+        self.alpha = alpha
+        self.gamma = gamma
+        self.label_smoothing = label_smoothing
+        self.weight = weight
+        self.num_classes = num_classes
+    
+    def forward(self, pred, label):
         """
-        pred: prediction output
-        label: gt
+        pred: prediction output (N, num_classes)
+        label: gt (N)
         """
-        if self.label_smoothing==0:
-            ce_loss = self.cross_entropy(pred,label)
-            pt = torch.exp(-ce_loss)
-            floss = (self.alpha*(1-pt)**self.gamma*ce_loss).mean()
-        else:
-            p_softmax = torch.softmax(pred,dim=1)
-            one_hot = torch.zeros(13).view(1, -1).scatter(1, label.view(-1, 1), 1)
-            one_hot_smooth = one_hot * (1 - self.label_smoothing) + self.label_smoothing / label.size(1)
-            floss = (self.alpha*(1-p_softmax)**self.gamma*one_hot_smooth*torch.log(p_softmax))
+        softmax = F.softmax(pred, dim=1)
+        log_softmax = F.log_softmax(pred, dim=1)
+        one_hot = torch.zeros((label.size(0), self.num_classes), device=label.device).scatter(1, label.unsqueeze(1), 1)
+        if self.label_smoothing != 0:
+            one_hot = one_hot * (1 - self.label_smoothing) + self.label_smoothing / self.num_classes
+        
+        ce_loss = -(one_hot * log_softmax).sum(dim=1)
+
+        pt = (softmax * one_hot).sum(dim=1)
+        focal_weight = (1 - pt).pow(self.gamma)
+        if self.alpha is not None:
+            alpha_weight = (self.alpha * one_hot).sum(dim=1)
+            focal_weight = focal_weight * alpha_weight
+        floss = (focal_weight * ce_loss).mean()
         return floss
 
 

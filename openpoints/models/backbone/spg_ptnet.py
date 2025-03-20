@@ -20,6 +20,7 @@ class PTSeg_Balance_Prior(nn.Module):
                  num_classes=13,
                  mid_res=False,
                  beta=0.999,
+                 adp_pointnetv2=False,
                  **kwargs):
         super().__init__()
         self.num_classes = num_classes
@@ -45,11 +46,15 @@ class PTSeg_Balance_Prior(nn.Module):
                                    nsample=nsample[3])  # N/64
         self.enc5_prior = self._make_enc(block, planes[4], blocks[4], share_planes, stride=stride[4],
                                    nsample=nsample[4])  # N/256
-        self.projection = nn.Sequential(nn.Linear(planes[4], planes[3]), nn.BatchNorm1d(planes[3]), nn.ReLU(inplace=True),
-                                        nn.Linear(planes[3], planes[2]), nn.BatchNorm1d(planes[2]), nn.ReLU(inplace=True),
-                                        nn.Linear(planes[2], planes[0]), nn.BatchNorm1d(planes[0]), nn.ReLU(inplace=True))
-        
-        self.register_buffer('prior_ema', torch.rand(num_classes, planes[0]))
+        if not adp_pointnetv2:
+            self.projection = nn.Sequential(nn.Linear(planes[4], planes[3]), nn.BatchNorm1d(planes[3]), nn.ReLU(inplace=True),
+                                            nn.Linear(planes[3], planes[2]), nn.BatchNorm1d(planes[2]), nn.ReLU(inplace=True),
+                                            nn.Linear(planes[2], planes[0]), nn.BatchNorm1d(planes[0]), nn.ReLU(inplace=True))
+            self.register_buffer('prior_ema', torch.rand(num_classes, planes[0]))
+        else:
+            self.projection = nn.Sequential(nn.Linear(planes[4], planes[3]), nn.ReLU(inplace=True),
+                                            nn.Linear(planes[3], planes[2]), nn.ReLU(inplace=True))
+            self.register_buffer('prior_ema', torch.rand(num_classes, planes[2]))
         self.prior_ema = nn.functional.normalize(self.prior_ema, dim=1)
 
     def _make_enc(self, block, planes, blocks, share_planes=8, stride=1, nsample=16):
@@ -73,7 +78,7 @@ class PTSeg_Balance_Prior(nn.Module):
                 cur_status[label, :] = prior[mask_c, :-1].mean(0)
         self.prior_ema = self.beta * self.prior_ema + (1 - self.beta) * cur_status
 
-    def forward(self, p0, x0=None, o0=None):
+    def forward(self, p0, x0=None, o0=None, is_train=False, mask=None, ignore_index=None):
         # p, x, o: points, features, batches 
         # The dataloader input here is different from PointTransformer source code; 
         # it's need to modify input data{'pos':, 'x':, 'label':, } to the following form.
@@ -90,9 +95,20 @@ class PTSeg_Balance_Prior(nn.Module):
             if len(x0.size())>2: # means x0:(b, c ,n), need to be catted to (b*n, c)
                 x0 = x0.transpose(1,2).contiguous() # po(b, n, 3), x0(b, n, c=3)
                 p0 = torch.cat([p0_split.squeeze() for p0_split in p0.split(1,0)])
-                x0 = torch.cat([x0_split.squeeze() for x0_split in x0.split(1,0)]) 
+                x0 = torch.cat([x0_split.squeeze() for x0_split in x0.split(1,0)])
+                if is_train:
+                    labels = torch.cat([labels.squeeze() for labels in labels.split(1,0)]) 
         if x0.size(1)<6:
             x0 = torch.cat((p0,x0),1) # x0(n, c=in_channels+3)
+
+        if mask is not None:
+            p0, x0, labels = p0[mask], x0[mask], labels[mask]
+            new_o0 = []
+            for i in range(o0.size(0)):
+                new_o0.append(mask[:(o0[i])].sum())
+            o0 = torch.tensor(new_o0, dtype=o0.dtype, device=o0.device)
+            if ignore_index == 0:
+                labels = labels - 1
 
         # NOTE: prior model data prepare
         # # method 1: aggregate the same class feature in a batch 
@@ -282,14 +298,13 @@ class PTSeg_Balance_Main(nn.Module):
                 cur_status[label, :] = prior[mask_c, :-1].mean(0)
         self.prior_ema = self.beta * self.prior_ema + (1 - self.beta) * cur_status
 
-    def forward(self, p0, x0=None, o0=None, is_train=False):
+    def forward(self, p0, x0=None, o0=None, is_train=False, mask=None, ignore_index=None):
         # p, x, o: points, features, batches 
         # The dataloader input here is different from PointTransformer source code; 
         # it's need to modify input data{'pos':, 'x':, 'label':, } to the following form.
         if x0 is None:  # this means p0 is a dict.
             p0, x0, o0, labels = p0['pos'], p0.get('x', None), p0.get('offset', None), p0.get('y', None)
-            if x0 is None:
-                x0 = p0
+            if x0 is None: x0 = p0
             if o0 == None:
                 o0, count = [], 0
                 for _ in range(p0.size()[0]):
@@ -299,9 +314,11 @@ class PTSeg_Balance_Main(nn.Module):
             if len(x0.size())>2: # means x0:(b, c ,n), need to be catted to (b*n, c)
                 x0 = x0.transpose(1,2).contiguous() # po(b, n, 3), x0(b, n, c=3)
                 p0 = torch.cat([p0_split.squeeze() for p0_split in p0.split(1,0)])
-                x0 = torch.cat([x0_split.squeeze() for x0_split in x0.split(1,0)]) 
+                x0 = torch.cat([x0_split.squeeze() for x0_split in x0.split(1,0)])
+                if is_train:
+                    labels = torch.cat([labels.squeeze() for labels in labels.split(1,0)]) 
         if x0.size(1)<6:
-            x0 = torch.cat((p0,x0),1) # x0(n, c=in_channels+3)       
+            x0 = torch.cat((p0, x0), 1)  # x0(n, c=in_channels+3)           
         
         # main model encoder and decoder
         p1, x1, o1 = self.enc1([p0, x0, o0])
@@ -316,8 +333,16 @@ class PTSeg_Balance_Main(nn.Module):
         x1 = self.dec1[1:]([p1, self.dec1[0]([p1, x1, o1], [p2, x2, o2]), o1])[1]
         logits = self.cls(x1)
         if not is_train: return logits
+
         feas_norm = nn.functional.normalize(x1, dim=1)
-        logits_softmax = nn.functional.softmax(logits, dim=1)
+        if mask is not None:
+            labels = labels[mask]
+            if ignore_index == 0:
+                labels = labels - 1
+            seg_logits, feas_norm = logits[mask, :], feas_norm[mask, :]
+        else: 
+            seg_logits = logits
+        logits_softmax = nn.functional.softmax(seg_logits, dim=1)
         preds = logits_softmax.argmax(dim=1)
         mask_true = (preds==labels)
         # # method1: current scene prototype
@@ -399,7 +424,7 @@ class PTSegV2_Balance_Prior(nn.Module):
             )
             self.enc_stages.append(enc)
         self.projection = nn.Sequential(nn.Linear(enc_channels[-1], enc_channels[-2]), nn.BatchNorm1d(enc_channels[-2]), nn.ReLU(inplace=True),
-                                        nn.Linear(enc_channels[-2], 48), nn.BatchNorm1d(48), nn.ReLU(inplace=True))
+                                        nn.Linear(enc_channels[-2], enc_channels[-4]), nn.BatchNorm1d(enc_channels[-4]), nn.ReLU(inplace=True))
         # ema
         self.register_buffer('prior_ema', torch.rand(num_classes, 48))
         self.prior_ema = nn.functional.normalize(self.prior_ema, dim=1)
@@ -666,6 +691,8 @@ class PTSegV2_Balance_Main(nn.Module):
             if ignore_index == 0:
                 labels = labels - 1
             seg_logits, feas_norm = seg_logits_src[mask, :], feas_norm[mask, :]
+        else:
+            seg_logits = seg_logits_src
         logits_softmax = nn.functional.softmax(seg_logits, dim=1)
         preds = logits_softmax.argmax(dim=1)
         mask_true = (preds==labels)

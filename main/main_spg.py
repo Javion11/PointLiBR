@@ -72,12 +72,13 @@ def main(gpu, cfg):
 
     if cfg.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-        model_prior = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model_prior)
+        if cfg.model_prior.NAME != "BaseSeg_Balance_Prior":
+            model_prior = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model_prior)
         logging.info('Using Synchronized BatchNorm ...')
     if cfg.distributed:
         torch.cuda.set_device(gpu)
-        model = nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[cfg.rank], output_device=cfg.rank)
-        model_prior = nn.parallel.DistributedDataParallel(model_prior.cuda(), device_ids=[cfg.rank], output_device=cfg.rank)
+        model = nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[cfg.rank], output_device=cfg.rank, broadcast_buffers=True)
+        model_prior = nn.parallel.DistributedDataParallel(model_prior.cuda(), device_ids=[cfg.rank], output_device=cfg.rank, broadcast_buffers=True)
         logging.info('Using Distributed Data parallel ...')
 
     # optimizer & scheduler
@@ -102,7 +103,7 @@ def main(gpu, cfg):
     cfg.classes = val_loader.dataset.classes if hasattr(val_loader.dataset, 'classes') else np.range(num_classes)
     cfg.cmap = np.array(val_loader.dataset.cmap) if hasattr(val_loader.dataset, 'cmap') else None
 
-    if (cfg.task_name == "semantic3d") or (cfg.task_name == "toronto3d"):
+    if ("semantic3d" in cfg.dataset.common.NAME.lower()) or ("toronto3d" in cfg.dataset.common.NAME.lower()):
         test_loader = build_dataloader_from_cfg(cfg.get('val_batch_size', cfg.batch_size),
                                            cfg.dataset,
                                            cfg.dataloader,
@@ -111,7 +112,7 @@ def main(gpu, cfg):
                                            distributed=cfg.distributed
                                            )
         logging.info(f"length of test dataset: {len(test_loader.dataset)}")
-    elif cfg.task_name == "scannetv2":
+    elif "scannetv2" in cfg.dataset.common.NAME.lower():
         cfg.test_batch_size = 1
         cfg.dataset.common.collate_fn = False # NOTE: train_loader's collate_fn need to be True
         cfg.dataloader.num_workers = 2
@@ -136,7 +137,7 @@ def main(gpu, cfg):
                 writer = SummaryWriter(log_dir=os.path.join(cfg.run_dir, 'tensorboard'), purge_step=cfg.start_epoch)
         elif cfg.mode == 'test':
             if cfg.rank == 0:
-                if cfg.task_name == "s3dis":
+                if "s3dis" in cfg.dataset.common.NAME.lower():
                     best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
                     miou, macc, oa, ious = test_s3dis(model, cfg.dataset.common.test_area, cfg)
                     with np.printoptions(precision=2, suppress=True):
@@ -230,7 +231,7 @@ def main(gpu, cfg):
     
     # test
     if cfg.rank == 0: # NOTE: only test on the main process, because in the ddp mode, the test code will be used for repeated times
-        if cfg.task_name == "s3dis":
+        if "s3dis" in cfg.dataset.common.NAME.lower():
             load_checkpoint(model, pretrained_path=os.path.join(cfg.ckpt_dir, f'{cfg.run_name}_main_model_ckpt_best.pth'))
             load_checkpoint(model_prior, pretrained_path=os.path.join(cfg.ckpt_dir, f'{cfg.run_name}_prior_model_ckpt_best.pth'))
             cfg.csv_path = os.path.join(cfg.run_dir, cfg.run_name + f'_area5.csv')
@@ -307,15 +308,17 @@ def train_one_epoch(model, train_loader, criterion, optimizer, scheduler, epoch,
         data = data_[1]
         data['mask'], data_prior['mask'] = None, None
         # some datasets need to ignore 'unlabeled' class
-        if ('Semantic3D' in cfg.dataset.common.NAME) or ('Toronto3D' in cfg.dataset.common.NAME):
+        if ('semantic3d' in cfg.dataset.common.NAME.lower()) or ('toronto3d' in cfg.dataset.common.NAME.lower()):
             data['mask'] = ~(data['y']==0) 
             data_prior['mask'] = ~(data_prior['y']==0)
-        elif 'scannetv2' in cfg.dataset.common.NAME:
+        elif 'scannetv2' in cfg.dataset.common.NAME.lower():
             data['mask'] = ~(data['y']==255) 
             data_prior['mask'] = ~(data_prior['y']==255)
         keys = data.keys() if callable(data.keys) else data.keys
         for key in keys:
-            if not isinstance(data[key], list):
+            if data[key] is None:
+                continue
+            elif not isinstance(data[key], list):
                 data_prior[key] = data_prior[key].cuda(non_blocking=True)
                 data[key] = data[key].cuda(non_blocking=True)
             elif torch.is_tensor(data[key][0]):
@@ -333,7 +336,7 @@ def train_one_epoch(model, train_loader, criterion, optimizer, scheduler, epoch,
             data['x'] = get_scene_seg_features(cfg.model.in_channels, data['pos'], data['x'])
             data_prior['x'] = get_scene_seg_features(cfg.model_prior.in_channels, data_prior['pos'], data_prior['x'])
 
-        prior_feas, prior_prototype = model_prior(data_prior, mask=data_prior['mask'], ignore_index=cfg.ignore_index)
+        prior_feas, prior_prototype = model_prior(data_prior, is_train=True, mask=data_prior['mask'], ignore_index=cfg.ignore_index)
         logits, main_feas, main_prototype = model(data, is_train=True, mask=data['mask'], ignore_index=cfg.ignore_index) 
 
         # NOTE: prior branch loss
@@ -411,10 +414,10 @@ def validate(model, val_loader, cfg):
     pbar = tqdm(enumerate(val_loader), total=val_loader.__len__())
     for idx, data in pbar:
         # if idx>2: break #debug
-        # Semantic3D and scannetv2 need to ignore 'unlabeled' class
-        if ('Semantic3D' in cfg.dataset.common.NAME) or ('Toronto3D' in cfg.dataset.common.NAME):
+        # some datasets need to ignore 'unlabeled' class
+        if ('semantic3d' in cfg.dataset.common.NAME.lower()) or ('toronto3d' in cfg.dataset.common.NAME.lower()):
             data['mask'] = ~(data['y']==0) 
-        elif 'scannetv2' in cfg.dataset.common.NAME:
+        elif 'scannetv2' in cfg.dataset.common.NAME.lower():
             data['mask'] = ~(data['y']==255) 
         keys = data.keys() if callable(data.keys) else data.keys
         for key in keys:
@@ -434,11 +437,11 @@ def validate(model, val_loader, cfg):
         # all points are concatnated into the first dim without batch dim in ptnet, so moidfy target dim
         if len(logits.size())==2 and len(target.size())>1:
             target = torch.cat([target_split.squeeze() for target_split in target.split(1,0)])
-        # Semantic3D and scannetv2 need to ignore 'unlabeled' class
+        # some datasets need to ignore 'unlabeled' class
         predits = logits.argmax(dim=1)
-        if 'Semantic3D' in cfg.dataset.common.NAME or ('Toronto3D' in cfg.dataset.common.NAME):
+        if 'semantic3d' in cfg.dataset.common.NAME.lower() or ('toronto3d' in cfg.dataset.common.NAME.lower()):
             predits = predits + 1 # restore mapping in training: from [0,7] to [1,8] 
-        elif 'scannetv2' in cfg.dataset.common.NAME:
+        elif 'scannetv2' in cfg.dataset.common.NAME.lower():
             predits = predits[data['mask']] 
             target = target[data['mask']] 
         cm.update(predits, target)
@@ -536,8 +539,9 @@ if __name__ == "__main__":
     parser.add_argument('--profile', action='store_true', default=False, help='set to True to profile speed')
     args, opts = parser.parse_known_args()
     # args.debug = True # set debug mode
+    args.cfg = "cfgs/spg/spg_pointnet++.yaml"
     # args.cfg = "cfgs/spg/spg_ptv1.yaml"
-    args.cfg = "cfgs/spg/spg_ptv2.yaml"
+    # args.cfg = "cfgs/spg/spg_ptv2.yaml"
     args.profile = True
 
     cfg = EasyConfig()

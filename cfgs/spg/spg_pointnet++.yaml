@@ -1,0 +1,143 @@
+model:
+  NAME: BaseSeg_Balance_Main
+  in_channels: 4
+  beta: 0.999 # ema param
+  encoder_args:
+    NAME: PointNet2Encoder
+    in_channels: 4
+    width: null
+    strides: [4, 4, 4, 4]
+    layers: 3
+    use_res: False
+    mlps: [[[32, 32, 64]],  # stage 1: 96
+        [[64, 64, 128]], # stage 2: 256
+        [[128, 128, 256]], # stage 3: 512
+        [[256, 256, 512]]] # stage 4: 1024
+    radius: 0.1
+    num_samples: 32
+    sample_method: fps
+    aggr_args:
+      NAME: 'convpool'
+      feature_type: 'dp_fj'
+      anisotropic: False
+      reduction: 'max'
+    group_args:
+      NAME: 'ballquery'
+      use_xyz: True
+    conv_args:
+      order: conv-norm-act
+    act_args:
+      act: 'relu'
+    norm_args:
+      norm: 'bn'
+  decoder_args:
+    NAME: PointNet2Decoder
+    fp_mlps: [[128, 128, 128], [256, 128], [256, 256], [256, 256]]
+  cls_args:
+    NAME: SegHead
+    num_classes: 13
+    in_channels: null
+model_prior:
+  NAME: BaseSeg_Balance_Prior
+  in_channels: 4
+  beta: 0.999 # ema param
+  encoder_args:
+    NAME: PointNet2Encoder
+    in_channels: 4
+    width: null
+    strides: [4, 4, 4, 4]
+    layers: 3
+    use_res: False
+    mlps: [[[32, 32, 64]],  # stage 1: 96
+        [[64, 64, 128]], # stage 2: 256
+        [[128, 128, 256]], # stage 3: 512
+        [[256, 256, 512]]] # stage 4: 1024
+    radius: 0.1
+    num_samples: 32
+    sample_method: fps
+    aggr_args:
+      NAME: 'convpool'
+      feature_type: 'dp_fj'
+      anisotropic: False
+      reduction: 'max'
+    group_args:
+      NAME: 'ballquery'
+      use_xyz: True
+    conv_args:
+      order: conv-norm-act
+    act_args:
+      act: 'relu'
+    norm_args:
+      norm: 'bn'
+  cls_args:
+    num_classes: 13
+
+# model_prior:
+#   NAME: PTSeg_Balance_Prior
+#   in_channels: 6
+#   beta: 0.999 # 0.999
+#   adp_pointnetv2: True
+
+epochs: 100
+batch_size: 4
+dataloader:
+  num_workers: 8
+
+dataset:
+  common:
+    NAME: S3DIS
+    data_root: data/S3DIS
+    test_area: 5
+    voxel_size: 0.04
+    variable: False # whether to use the original number of points. The number of point per point cloud is variable. Defaults to False.
+  train:
+    split: train
+    voxel_max: 40000 # difference from 24000 in pointnet++, 80000
+    loop: 30  # here, the training has been looped 30 times. therefore, the training epochs do not need much.
+    presample: False
+    views: False # put different aug on "main" and "prior" branch input data
+    sources: True # load different scene data to "main" and "prior" branch
+    contact: False # Mix3D: contact two scene as one input
+    contact_minor: False # contact minor class scene
+  val:
+    split: val
+    voxel_max: null
+    presample: True 
+  test:
+    split: test
+    voxel_max: null
+    presample: False 
+
+datatransforms:
+  train: [ChromaticAutoContrast, PointsToTensor, PointCloudScaling, PointCloudFloorCentering, PointCloudJitter, ChromaticDropGPU, ChromaticNormalize]
+  val: [PointsToTensor, PointCloudFloorCentering, ChromaticNormalize]
+  vote: [ChromaticDropGPU]
+  kwargs:
+    color_drop: 0.2
+    gravity_dim: 2
+    scale: [0.9, 1.1]
+    jitter_sigma: 0.005
+    jitter_clip: 0.02
+
+criterion:
+  NAME: CrossEntropy
+  label_smoothing: 0.2
+criterion_SupCon:
+  NAME: SupConLoss
+  temperature: 0.07
+
+optimizer:
+  NAME: 'adamw'  # performs 1 point better than adam
+  weight_decay: 1.0e-4
+
+# lr_scheduler:
+sched: cosine
+warmup_epochs: 0
+min_lr: 1.0e-5
+lr: 0.01  # 'sgd':0.1; 'adamw':0.01
+
+#############loss weight#################
+loss_prior: 1.0
+loss_prior_supcon: 1.0
+loss_main_l1: 1.0
+loss_main_ce: 1.0
