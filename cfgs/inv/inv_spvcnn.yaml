@@ -1,0 +1,92 @@
+model:
+  NAME: SPVCNN_Contrast
+  in_channels: 4 # xyzi
+  out_channels: 19
+  channels: [32, 64, 128, 256, 256, 128, 96, 96]
+  layers: [2, 2, 2, 2, 2, 2, 2, 2]
+  beta: 0.999
+
+dataset:
+  common:
+    NAME: SemanticKITTIDataset
+    collate_fn: True
+    data_root: data/SemanticKITTI/
+  train:
+    split: train
+    loop: 1
+    sources: True
+  val:
+    split: val
+  test:
+    split: test
+
+enable_amp: True
+num_classes: 19
+ignore_index: 0
+epochs: 50
+batch_size: 4
+val_batch_size: 4
+dataloader:
+  num_workers: 8 # num_workers for train and val
+
+val_fn: validate
+ignore_index: 0  # {0: unlabeled points} marks points without ground truth and should not be used for training! 
+
+datatransforms:
+  train: [
+    {name: RandomRotate, angle: [-1, 1], axis: 'z', center: [0, 0, 0], p: 0.5},
+    {name: PointClip, point_cloud_range: [-35.2, -35.2, -4, 35.2, 35.2, 2]},
+    {name: RandomScale, scale: [0.9, 1.1]},
+    {name: RandomFlip, p: 0.5},
+    {name: RandomJitter, sigma: 0.005, clip: 0.02},
+    {name: GridSample, grid_size: 0.05, hash_type: fnv, mode: train, keys: ["pos", "strength", "y"], return_grid_coord: True},
+    {name: PointsToTensor},
+    {name: Collect, keys: ["pos", "grid_coord", "y"], x_keys: ["pos", "strength"]},]
+  val: [
+    {name: PointClip, point_cloud_range: [-35.2, -35.2, -4, 35.2, 35.2, 2]},
+    {name: GridSample, grid_size: 0.05, hash_type: fnv, mode: train, keys: ["pos", "strength", "y"], return_grid_coord: True},
+    {name: PointsToTensor},
+    {name: Collect, keys: ["pos", "grid_coord", "y"], x_keys: ["pos", "strength"]},]
+
+cls_weighed_loss: False
+criterion:
+  NAME: CrossEntropy
+  label_smoothing: 0.2
+criterion_mask:
+  NAME: MaskedCrossEntropy
+  label_smoothing: 0.2
+  ignore_index: 0
+criterion_SupCon:
+  NAME: SupConLoss
+  temperature: 0.07
+
+optimizer:
+ NAME: 'adamw'
+ weight_decay: 0.005
+
+# lr_scheduler:
+sched_on_epoch: False # update scheduler for each iter
+sched: OneCycleLR
+sched_params: 
+  max_lr: 0.002
+  pct_start: 0.04
+  anneal_strategy: 'cos'
+  div_factor: 10.0
+  final_div_factor: 100.0
+lr: 0.002
+
+grad_norm_clip: 10
+use_voting: False
+# ---------------------------------------------------------------------------- #
+# io and misc
+# ---------------------------------------------------------------------------- #
+log_dir: 'semantickitti'
+save_freq: -1 # save epoch every xxx epochs, -1 only save last and best. 
+val_freq: 1
+
+#############loss weight#################
+loss_l1: 1.0
+loss_struct: 1.0
+loss_ce: 1.0
+loss_prior_supcon: 1.0
+loss_ce_prior: 1.0

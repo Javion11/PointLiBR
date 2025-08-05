@@ -17,6 +17,7 @@ _by [Jiawei Han](https://github.com/Javion11)_
 -  :boom: 2024/07: **SPG** accepted by ECCV'2024. **SPG** can mitigate class imbalance in point cloud semantic segmentation through separate subspace prototypes.
 -  :boom: 2024/07: Code released! This code base is a reference implementation of the main ideas of the papers.
 -  :boom: 2025/03: **InvSapceNet** accepted by TPAMI'2025. **InvSapceNet** generates an inverse feature space, which can guide the training of the semantic segmentation network and mitigate the cognitive bias caused by unbalanced data.
+-  :boom: 2025/08: **InvSapceNet**'s reference implementation code is released.
 
 
 ## Overview
@@ -100,14 +101,11 @@ If you find _PointLiBR_ useful to your research, please cite my work as encourag
   organization={Springer}
 }
 
-@ARTICLE{10933588,
+@article{han2025generating,
+  title={Generating inverse feature space for class imbalance in point cloud semantic segmentation},
   author={Han, Jiawei and Liu, Kaiqi and Li, Wei and Zhang, Feng and Xia, Xiang-Gen},
-  journal={IEEE Transactions on Pattern Analysis and Machine Intelligence}, 
-  title={Generating Inverse Feature Space for Class Imbalance in Point Cloud Semantic Segmentation}, 
+  journal={IEEE Transactions on Pattern Analysis and Machine Intelligence},
   year={2025},
-  volume={},
-  number={},
-  pages={1-17},
-  keywords={Point cloud compression;Semantic segmentation;Training;Prototypes;Convolution;Transformers;Propagation losses;Data models;Cognition;Training data;Point Cloud Semantic Segmentation;Class Imbalance;Inverse Feature Space;Momentum-updated Prototypes;Dynamic Loss Weights},
-  doi={10.1109/TPAMI.2025.3553051}}
+  publisher={IEEE}
+}
 ```
